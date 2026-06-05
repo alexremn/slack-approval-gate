@@ -136,3 +136,13 @@ jobs:
 ```
 
 If you only set the step-level `timeout-minutes:` the action will still default to 30 minutes internally and exit early as `timed-out`.
+
+## Contributing
+
+Contributions welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, the
+`dist/` rebuild rule, and commit conventions. Security issues: see
+[SECURITY.md](./SECURITY.md).
+
+## License
+
+[MIT](./LICENSE) © Alexander Remniov

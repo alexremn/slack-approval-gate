@@ -3,6 +3,25 @@
   "version": "1.0.0",
   "description": "Gate a GitHub Actions workflow on Slack approval (threaded or standalone).",
   "main": "dist/index.js",
+  "license": "MIT",
+  "author": "Alexander Remniov",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexremn/slack-approval-gate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alexremn/slack-approval-gate/issues"
+  },
+  "homepage": "https://github.com/alexremn/slack-approval-gate#readme",
+  "keywords": [
+    "github-actions",
+    "slack",
+    "approval",
+    "manual-approval",
+    "gate",
+    "ci",
+    "workflow"
+  ],
   "scripts": {
     "build": "ncc build src/index.ts -o dist --minify",
     "test": "jest",
