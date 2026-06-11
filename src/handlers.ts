@@ -124,11 +124,13 @@ export function registerHandlers(deps: HandlersDeps): void {
       // result === "approved"
       core.info(`Approval threshold reached; final approver ${userId}`);
       terminalFired = true;
+      // Custom payload replaces the whole message; only the default
+      // rendered status gets the standalone base blocks prepended.
       const finalPayload = hasPayload(successPayload)
         ? successPayload
-        : { blocks: renderFinalStatus("approved", state.getApprovers()) };
+        : mergeUpdate({ blocks: renderFinalStatus("approved", state.getApprovers()) });
       try {
-        await slack.updateApprovalReply(approvalMessageTs, mergeUpdate(finalPayload));
+        await slack.updateApprovalReply(approvalMessageTs, finalPayload);
       } catch (e) {
         logger.error(e as Error);
       }
@@ -184,9 +186,9 @@ export function registerHandlers(deps: HandlersDeps): void {
       terminalFired = true;
       const finalPayload = hasPayload(failPayload)
         ? failPayload
-        : { blocks: renderFinalStatus("rejected", state.getApprovers(), userId) };
+        : mergeUpdate({ blocks: renderFinalStatus("rejected", state.getApprovers(), userId) });
       try {
-        await slack.updateApprovalReply(approvalMessageTs, mergeUpdate(finalPayload));
+        await slack.updateApprovalReply(approvalMessageTs, finalPayload);
       } catch (e) {
         logger.error(e as Error);
       }

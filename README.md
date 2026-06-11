@@ -5,7 +5,7 @@ GitHub Action that gates a workflow on Slack approval. Two modes:
 - **Threaded**: pass `base-message-ts` and the action posts the approval reply in that message's thread. The pre-existing main message is never modified; state is reflected on the reply.
 - **Standalone**: omit `base-message-ts` and the action posts a single message combining `base-message-payload` (or a default GitHub-context block) with the approval prompt, then updates that same message in place as state changes. No thread reply is created.
 
-In both modes the message carrying the buttons is the one updated as approvals/rejections come in (in-progress, approved, rejected, canceled, timed-out). In standalone, that's the main message itself; in threaded, it's the reply.
+In both modes the message carrying the buttons is the one updated as approvals/rejections come in (in-progress, approved, rejected, canceled, timed-out). In standalone, that's the main message itself; in threaded, it's the reply. On the terminal update, a custom `success-message-payload`/`fail-message-payload` fully replaces that message; with no custom payload, the default one-line status is appended below the base blocks (standalone) or replaces the reply (threaded).
 
 ## Slack app setup
 
@@ -53,8 +53,8 @@ Create a Slack App in your workspace with this manifest:
 | `minimum-reject-count` | no | `1` | Rejections needed. Must be a positive integer and `≤ approvers.length`. |
 | `prevent-self-approval` | no | `false` | If `true`, the workflow's triggering actor cannot approve. Requires `self-approval-slack-id`. |
 | `self-approval-slack-id` | no | — | Slack user id of the triggering actor (mapping is the caller's responsibility). |
-| `success-message-payload` | no | rendered block | Replaces approval reply on full approval. |
-| `fail-message-payload` | no | rendered block | Replaces approval reply on reject/cancel/timeout. |
+| `success-message-payload` | no | rendered block | Replaces the approval message on full approval. In standalone mode it replaces the entire message (base blocks included), so include any context you want to keep. |
+| `fail-message-payload` | no | rendered block | Replaces the approval message on reject/cancel/timeout. Same standalone-mode semantics as `success-message-payload`. |
 | `timeout-minutes` | no | `30` | Action-level approval timeout. **Independent of step-level `timeout-minutes:`** — whichever fires first wins. Always pass this with `with:` rather than relying on the step-level setting. |
 
 ## Outputs

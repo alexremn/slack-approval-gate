@@ -228,7 +228,7 @@ describe("registerHandlers", () => {
     expect((payload.blocks as any[])[0]).toEqual(baseBlocks[0]);
   });
 
-  it("baseBlocks: reject terminal with custom failPayload still includes base blocks", async () => {
+  it("baseBlocks: reject terminal with custom failPayload replaces message without base blocks", async () => {
     const baseBlocks = [{ type: "section", text: { type: "mrkdwn", text: "B" } }];
     const { app, deps } = makeDeps({
       baseBlocks,
@@ -239,9 +239,25 @@ describe("registerHandlers", () => {
     const upd = (deps.slack as jest.Mocked<SlackClient>).updateApprovalReply;
     const [, payload] = upd.mock.calls[0];
     expect(payload.text).toBe("no");
-    expect((payload.blocks as any[])[0]).toEqual(baseBlocks[0]);
-    expect((payload.blocks as any[]).slice(1)).toEqual([
+    expect(payload.blocks).toEqual([
       { type: "section", text: { type: "mrkdwn", text: "X" } },
+    ]);
+  });
+
+  it("baseBlocks: approve terminal with custom successPayload replaces message without base blocks", async () => {
+    const baseBlocks = [{ type: "header", text: { type: "plain_text", text: "B" } }];
+    const { app, deps } = makeDeps({
+      state: new ApprovalState(["u1"], 1),
+      baseBlocks,
+      successPayload: { text: "ok", blocks: [{ type: "section", text: { type: "mrkdwn", text: "Y" } }] },
+    });
+    registerHandlers(deps);
+    await app.actions["slack-approval-approve"](makeBoltArgs("u1", "approve-id"));
+    const upd = (deps.slack as jest.Mocked<SlackClient>).updateApprovalReply;
+    const [, payload] = upd.mock.calls[0];
+    expect(payload.text).toBe("ok");
+    expect(payload.blocks).toEqual([
+      { type: "section", text: { type: "mrkdwn", text: "Y" } },
     ]);
   });
 

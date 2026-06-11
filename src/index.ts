@@ -140,10 +140,12 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     try {
+      // Custom payload replaces the whole message; only the default
+      // rendered status gets the standalone base blocks prepended.
       const status: MessagePayload = hasPayload(config.failMessagePayload)
         ? (config.failMessagePayload as MessagePayload)
-        : { blocks: renderFinalStatus("canceled", state.getApprovers()) };
-      await slack.updateApprovalReply(approvalMessageTs, mergeForUpdate(status));
+        : mergeForUpdate({ blocks: renderFinalStatus("canceled", state.getApprovers()) });
+      await slack.updateApprovalReply(approvalMessageTs, status);
     } catch (e) {
       core.warning(`Cancel update failed: ${(e as Error).message}`);
     }
@@ -159,8 +161,8 @@ async function main(): Promise<void> {
     try {
       const status: MessagePayload = hasPayload(config.failMessagePayload)
         ? (config.failMessagePayload as MessagePayload)
-        : { blocks: renderFinalStatus("timed-out", state.getApprovers()) };
-      await slack.updateApprovalReply(approvalMessageTs, mergeForUpdate(status));
+        : mergeForUpdate({ blocks: renderFinalStatus("timed-out", state.getApprovers()) });
+      await slack.updateApprovalReply(approvalMessageTs, status);
     } catch (e) {
       core.warning(`Timeout update failed: ${(e as Error).message}`);
     }
