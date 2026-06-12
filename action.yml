@@ -29,11 +29,17 @@ inputs:
     required: false
     default: "1"
   success-message-payload:
-    description: JSON payload that replaces the approval reply on full approval.
+    description: >-
+      JSON payload that replaces the approval reply on full approval.
+      Supports template variables: {{approvers}} and {{rejecters}} are
+      replaced with Slack mention lists at update time.
     required: false
     default: "{}"
   fail-message-payload:
-    description: JSON payload that replaces the approval reply on reject/cancel/timeout.
+    description: >-
+      JSON payload that replaces the approval reply on reject/cancel/timeout.
+      Supports template variables: {{approvers}} and {{rejecters}} are
+      replaced with Slack mention lists at update time.
     required: false
     default: "{}"
   timeout-minutes:

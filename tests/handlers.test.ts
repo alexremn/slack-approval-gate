@@ -261,6 +261,33 @@ describe("registerHandlers", () => {
     ]);
   });
 
+  it("approve: custom successPayload substitutes {{approvers}} with mentions", async () => {
+    const { app, deps } = makeDeps({
+      state: new ApprovalState(["u1"], 1),
+      successPayload: {
+        text: "Approved by {{approvers}}",
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "✅ {{approvers}}" } }],
+      },
+    });
+    registerHandlers(deps);
+    await app.actions["slack-approval-approve"](makeBoltArgs("u1", "approve-id"));
+    const upd = (deps.slack as jest.Mocked<SlackClient>).updateApprovalReply;
+    const [, payload] = upd.mock.calls[0];
+    expect(payload.text).toBe("Approved by <@u1>");
+    expect((payload.blocks as any[])[0].text.text).toBe("✅ <@u1>");
+  });
+
+  it("reject: custom failPayload substitutes {{rejecters}} with mentions", async () => {
+    const { app, deps } = makeDeps({
+      failPayload: { text: "Denied by {{rejecters}}" },
+    });
+    registerHandlers(deps);
+    await app.actions["slack-approval-reject"](makeBoltArgs("u2", "reject-id"));
+    const upd = (deps.slack as jest.Mocked<SlackClient>).updateApprovalReply;
+    const [, payload] = upd.mock.calls[0];
+    expect(payload.text).toBe("Denied by <@u2>");
+  });
+
   it("reject: action.value mismatch is ignored", async () => {
     const { app, deps, onTerminal } = makeDeps();
     registerHandlers(deps);

@@ -8,6 +8,7 @@ import {
   readGithubContext,
   renderApprovalReply,
   renderFinalStatus,
+  substituteTemplateVars,
   type MessagePayload,
   type Outcome,
 } from "./payloads";
@@ -143,7 +144,10 @@ async function main(): Promise<void> {
       // Custom payload replaces the whole message; only the default
       // rendered status gets the standalone base blocks prepended.
       const status: MessagePayload = hasPayload(config.failMessagePayload)
-        ? (config.failMessagePayload as MessagePayload)
+        ? substituteTemplateVars(config.failMessagePayload as MessagePayload, {
+            approvers: state.getApprovers(),
+            rejecters: state.getRejecters(),
+          })
         : mergeForUpdate({ blocks: renderFinalStatus("canceled", state.getApprovers()) });
       await slack.updateApprovalReply(approvalMessageTs, status);
     } catch (e) {
@@ -160,7 +164,10 @@ async function main(): Promise<void> {
     shuttingDown = true;
     try {
       const status: MessagePayload = hasPayload(config.failMessagePayload)
-        ? (config.failMessagePayload as MessagePayload)
+        ? substituteTemplateVars(config.failMessagePayload as MessagePayload, {
+            approvers: state.getApprovers(),
+            rejecters: state.getRejecters(),
+          })
         : mergeForUpdate({ blocks: renderFinalStatus("timed-out", state.getApprovers()) });
       await slack.updateApprovalReply(approvalMessageTs, status);
     } catch (e) {

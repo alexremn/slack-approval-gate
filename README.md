@@ -53,9 +53,37 @@ Create a Slack App in your workspace with this manifest:
 | `minimum-reject-count` | no | `1` | Rejections needed. Must be a positive integer and `≤ approvers.length`. |
 | `prevent-self-approval` | no | `false` | If `true`, the workflow's triggering actor cannot approve. Requires `self-approval-slack-id`. |
 | `self-approval-slack-id` | no | — | Slack user id of the triggering actor (mapping is the caller's responsibility). |
-| `success-message-payload` | no | rendered block | Replaces the approval message on full approval. In standalone mode it replaces the entire message (base blocks included), so include any context you want to keep. |
-| `fail-message-payload` | no | rendered block | Replaces the approval message on reject/cancel/timeout. Same standalone-mode semantics as `success-message-payload`. |
+| `success-message-payload` | no | rendered block | Replaces the approval message on full approval. In standalone mode it replaces the entire message (base blocks included), so include any context you want to keep. Supports [template variables](#template-variables). |
+| `fail-message-payload` | no | rendered block | Replaces the approval message on reject/cancel/timeout. Same standalone-mode semantics as `success-message-payload`. Supports [template variables](#template-variables). |
 | `timeout-minutes` | no | `30` | Action-level approval timeout. **Independent of step-level `timeout-minutes:`** — whichever fires first wins. Always pass this with `with:` rather than relying on the step-level setting. |
+
+### Template variables
+
+`success-message-payload` and `fail-message-payload` may contain template
+variables that are substituted when the message is updated — after the
+decision is made, so they reflect who actually clicked:
+
+| Variable | Replaced with |
+|----------|---------------|
+| `{{approvers}}` | Mention list of everyone who approved, e.g. `<@U111>, <@U222>` |
+| `{{rejecters}}` | Mention list of everyone who rejected |
+
+An empty list substitutes to an empty string. Whitespace inside the braces
+is allowed (`{{ approvers }}`). Variables work anywhere in the payload —
+`text` or any block content. Example:
+
+```yaml
+fail-message-payload: |
+  {
+    "text": "Deployment denied",
+    "blocks": [
+      { "type": "section", "text": { "type": "mrkdwn", "text": "❌ Deployment denied by {{rejecters}}" } }
+    ]
+  }
+```
+
+The default (no custom payload) terminal status already includes who
+approved or rejected.
 
 ## Outputs
 

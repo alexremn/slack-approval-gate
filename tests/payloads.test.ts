@@ -4,6 +4,7 @@ import {
   defaultMainPayload,
   renderApprovalReply,
   renderFinalStatus,
+  substituteTemplateVars,
   escapeMrkdwn,
 } from "../src/payloads";
 
@@ -166,6 +167,50 @@ describe("renderApprovalReply", () => {
 describe("escapeMrkdwn", () => {
   it("escapes &, <, >", () => {
     expect(escapeMrkdwn("a&b<c>d")).toBe("a&amp;b&lt;c&gt;d");
+  });
+});
+
+describe("substituteTemplateVars", () => {
+  const vars = { approvers: ["u1", "u2"], rejecters: ["u9"] };
+
+  it("replaces {{approvers}} in text with mention list", () => {
+    const out = substituteTemplateVars({ text: "Approved by {{approvers}}" }, vars);
+    expect(out.text).toBe("Approved by <@u1>, <@u2>");
+  });
+
+  it("replaces {{rejecters}} inside blocks", () => {
+    const out = substituteTemplateVars(
+      { blocks: [{ type: "section", text: { type: "mrkdwn", text: "Denied by {{rejecters}}" } }] },
+      vars,
+    );
+    expect((out.blocks![0] as any).text.text).toBe("Denied by <@u9>");
+  });
+
+  it("tolerates whitespace inside braces and multiple occurrences", () => {
+    const out = substituteTemplateVars(
+      { text: "{{ approvers }} / {{approvers}}" },
+      vars,
+    );
+    expect(out.text).toBe("<@u1>, <@u2> / <@u1>, <@u2>");
+  });
+
+  it("replaces with empty string when list is empty", () => {
+    const out = substituteTemplateVars(
+      { text: "by {{rejecters}}" },
+      { approvers: [], rejecters: [] },
+    );
+    expect(out.text).toBe("by ");
+  });
+
+  it("leaves payloads without tokens untouched", () => {
+    const payload = { text: "plain", blocks: [{ type: "section" }] };
+    expect(substituteTemplateVars(payload, vars)).toEqual(payload);
+  });
+
+  it("does not mutate the input payload", () => {
+    const payload = { text: "by {{approvers}}" };
+    substituteTemplateVars(payload, vars);
+    expect(payload.text).toBe("by {{approvers}}");
   });
 });
 

@@ -142,6 +142,29 @@ export function renderApprovalReply(state: ApprovalReplyState): unknown[] {
   ];
 }
 
+export interface TemplateVars {
+  approvers: string[];
+  rejecters: string[];
+}
+
+function mentionList(userIds: string[]): string {
+  return userIds.map(id => `<@${id}>`).join(", ");
+}
+
+export function substituteTemplateVars(
+  payload: MessagePayload,
+  vars: TemplateVars,
+): MessagePayload {
+  if (!hasPayload(payload)) return payload;
+  // Tokens are replaced on the serialized payload so they work anywhere —
+  // text, block contents, nested fields. Slack mentions contain no
+  // JSON-significant characters, so the result stays valid JSON.
+  const json = JSON.stringify(payload)
+    .replace(/\{\{\s*approvers\s*\}\}/g, mentionList(vars.approvers))
+    .replace(/\{\{\s*rejecters\s*\}\}/g, mentionList(vars.rejecters));
+  return JSON.parse(json) as MessagePayload;
+}
+
 export type Outcome = "approved" | "rejected" | "canceled" | "timed-out";
 
 export function renderFinalStatus(
