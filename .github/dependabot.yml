@@ -3,6 +3,14 @@ updates:
   - package-ecosystem: npm
     directory: "/"
     schedule: { interval: weekly }
+    ignore:
+      # TypeScript 7 ships only the native tsc binary with no JS compiler API;
+      # ts-jest and ncc's ts-loader cannot load it. Lift once ts-jest supports >=7.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      # Keep @types/node on the action runtime major (node24 in action.yml).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule: { interval: weekly }
