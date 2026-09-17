@@ -11,6 +11,11 @@ updates:
       # Keep @types/node on the action runtime major (node24 in action.yml).
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # @actions/core 3.x is ESM-only ("type": "module", exports map has no
+      # "require" condition), so the CommonJS jest/ts-jest suite cannot resolve
+      # it. Lift once src/ and the test setup move to ESM.
+      - dependency-name: "@actions/core"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule: { interval: weekly }
