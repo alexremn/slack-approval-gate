@@ -112,4 +112,33 @@ describe("SlackClient", () => {
       }),
     );
   });
+  it("postMain retries when web-api wraps a transient network error", async () => {
+    const web = makeWeb();
+    const err: any = new Error("A request error occurred: connect ETIMEDOUT");
+    err.code = "slack_webapi_request_error";
+    err.original = Object.assign(new Error("connect ETIMEDOUT"), {
+      code: "ETIMEDOUT",
+    });
+    web.chat.postMessage
+      .mockRejectedValueOnce(err)
+      .mockResolvedValueOnce({ ts: "8.8" });
+    const client = new SlackClient(web as any, "C1");
+    const ts = await client.postMain({ text: "hi" });
+    expect(ts).toBe("8.8");
+    expect(web.chat.postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("postMain does not retry when the wrapped error is not transient", async () => {
+    const web = makeWeb();
+    const err: any = new Error("A request error occurred: invalid url");
+    err.code = "slack_webapi_request_error";
+    err.original = Object.assign(new Error("invalid url"), {
+      code: "ERR_INVALID_URL",
+    });
+    web.chat.postMessage.mockRejectedValue(err);
+    const client = new SlackClient(web as any, "C1");
+    await expect(client.postMain({ text: "hi" })).rejects.toThrow(/invalid url/);
+    expect(web.chat.postMessage).toHaveBeenCalledTimes(1);
+  });
+
 });

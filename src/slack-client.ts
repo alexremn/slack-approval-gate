@@ -27,11 +27,21 @@ async function withRetry<T>(
   throw lastErr;
 }
 
+// @slack/web-api wraps network failures in a WebAPIRequestError, whose own code
+// is "slack_webapi_request_error" and whose .original holds the node error.
+const TRANSIENT_CODES = ["ETIMEDOUT", "ECONNRESET"];
+
 function isRetryable(e: unknown): boolean {
-  const err = e as { code?: string; data?: { error?: string }; statusCode?: number };
+  const err = e as {
+    code?: string;
+    data?: { error?: string };
+    statusCode?: number;
+    original?: { code?: string };
+  };
   if (err?.statusCode && err.statusCode >= 500) return true;
   if (err?.statusCode === 429) return true;
-  if (err?.code === "ETIMEDOUT" || err?.code === "ECONNRESET") return true;
+  if (TRANSIENT_CODES.includes(err?.code ?? "")) return true;
+  if (TRANSIENT_CODES.includes(err?.original?.code ?? "")) return true;
   if (err?.data?.error === "ratelimited") return true;
   return false;
 }
