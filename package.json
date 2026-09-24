@@ -1,6 +1,6 @@
 {
   "name": "slack-approval-gate",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Gate a GitHub Actions workflow on Slack approval (threaded or standalone).",
   "main": "dist/index.js",
   "license": "MIT",
