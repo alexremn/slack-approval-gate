@@ -82,10 +82,10 @@ describe("ApprovalState", () => {
   });
 
   it("mutex survives a callback that returns a falsy value", async () => {
-    const s = new ApprovalState(["u1"], 1);
+    const s = new ApprovalState(["u1", "u2"], 2);
     const r1 = s.tryApprove("u1");
     const r2 = s.tryApprove("u1");
-    await expect(r1).resolves.toBe("approved");
+    await expect(r1).resolves.toBe("remaining");
     await expect(r2).resolves.toBe("already-approved");
   });
 
@@ -93,5 +93,62 @@ describe("ApprovalState", () => {
     const s = new ApprovalState(["u1"], 1, 3);
     expect(s.minimumCount).toBe(1);
     expect(s.minimumRejectCount).toBe(3);
+  });
+
+  it("closes on approval threshold: later votes return closed and are not recorded", async () => {
+    const s = new ApprovalState(["u1", "u2"], 1);
+    await expect(s.tryApprove("u1")).resolves.toBe("approved");
+    expect(s.isClosed()).toBe(true);
+    await expect(s.tryApprove("u2")).resolves.toBe("closed");
+    await expect(s.tryReject("u2")).resolves.toBe("closed");
+    expect(s.getApprovers()).toEqual(["u1"]);
+    expect(s.getRejecters()).toEqual([]);
+  });
+
+  it("closes on reject threshold: later approvals are not recorded", async () => {
+    const s = new ApprovalState(["u1", "u2"], 1);
+    await expect(s.tryReject("u1")).resolves.toBe("rejected");
+    expect(s.isClosed()).toBe(true);
+    await expect(s.tryApprove("u2")).resolves.toBe("closed");
+    expect(s.getApprovers()).toEqual([]);
+  });
+
+  it("stays open while votes are below both thresholds", async () => {
+    const s = new ApprovalState(["u1", "u2", "u3"], 2, 2);
+    await s.tryApprove("u1");
+    await s.tryReject("u2");
+    expect(s.isClosed()).toBe(false);
+  });
+
+  it("concurrent final approve and reject yield exactly one terminal result", async () => {
+    const s = new ApprovalState(["u1", "u2"], 1);
+    const results = await Promise.all([s.tryApprove("u1"), s.tryReject("u2")]);
+    expect(results).toEqual(["approved", "closed"]);
+    expect(s.getRejecters()).toEqual([]);
+  });
+
+  it("concurrent approvals past the threshold: one approved, the rest closed", async () => {
+    const s = new ApprovalState(["u1", "u2", "u3"], 1);
+    const results = await Promise.all([
+      s.tryApprove("u1"),
+      s.tryApprove("u2"),
+      s.tryApprove("u3"),
+    ]);
+    expect(results).toEqual(["approved", "closed", "closed"]);
+    expect(s.getApprovers()).toEqual(["u1"]);
+  });
+
+  it("close() claims the outcome exactly once and blocks later votes", async () => {
+    const s = new ApprovalState(["u1"], 1);
+    expect(s.close()).toBe(true);
+    expect(s.close()).toBe(false);
+    await expect(s.tryApprove("u1")).resolves.toBe("closed");
+    expect(s.getApprovers()).toEqual([]);
+  });
+
+  it("close() fails once a vote has decided the outcome", async () => {
+    const s = new ApprovalState(["u1"], 1);
+    await s.tryApprove("u1");
+    expect(s.close()).toBe(false);
   });
 });

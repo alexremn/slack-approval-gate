@@ -64,6 +64,9 @@ function parseBool(name: string, raw: string, fallback: boolean): boolean {
   throw new Error(`Input ${name} must be true/false, got "${raw}"`);
 }
 
+// setTimeout clamps delays above 2^31-1 ms to 1 ms, which would time out at once.
+const MAX_TIMEOUT_MINUTES = Math.floor(0x7fffffff / 60_000);
+
 const SLACK_CHANNEL_ID_RE = /^[CGD][A-Z0-9]{6,}$/;
 const SLACK_USER_ID_RE = /^[UW][A-Z0-9]{6,}$/;
 const APP_TOKEN_RE = /^xapp-/;
@@ -147,6 +150,11 @@ export function loadConfig(): Config {
     core.getInput("timeout-minutes"),
     30,
   );
+  if (timeoutMinutes > MAX_TIMEOUT_MINUTES) {
+    throw new Error(
+      `Input timeout-minutes must be at most ${MAX_TIMEOUT_MINUTES}, got "${timeoutMinutes}"`,
+    );
+  }
 
   const preventSelfApproval = parseBool(
     "prevent-self-approval",
@@ -157,6 +165,15 @@ export function loadConfig(): Config {
   if (preventSelfApproval && selfApprovalSlackId && !SLACK_USER_ID_RE.test(selfApprovalSlackId)) {
     throw new Error(
       `self-approval-slack-id "${selfApprovalSlackId}" is not a valid Slack user id`,
+    );
+  }
+  if (
+    preventSelfApproval &&
+    approvers.includes(selfApprovalSlackId) &&
+    minimumApprovalCount > approvers.length - 1
+  ) {
+    throw new Error(
+      `minimum-approval-count (${minimumApprovalCount}) is unreachable: self-approval by ${selfApprovalSlackId} is blocked, leaving ${approvers.length - 1} eligible approver(s)`,
     );
   }
   if (preventSelfApproval && !selfApprovalSlackId) {

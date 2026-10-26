@@ -49,13 +49,13 @@ Create a Slack App in your workspace with this manifest:
 | `base-message-ts` | no | — | Enables threaded mode. |
 | `base-message-payload` | no | `{}` (uses built-in GH-context block when empty) | Standalone-mode main message JSON. Must be a JSON object. |
 | `approvers` | yes | — | Comma-separated Slack user IDs (`U…`/`W…`). |
-| `minimum-approval-count` | no | `1` | Approvals needed. Must be a positive integer and `≤ approvers.length`. |
+| `minimum-approval-count` | no | `1` | Approvals needed. Must be a positive integer and `≤ approvers.length`. With `prevent-self-approval`, it must also be reachable without the triggering actor. |
 | `minimum-reject-count` | no | `1` | Rejections needed. Must be a positive integer and `≤ approvers.length`. |
 | `prevent-self-approval` | no | `false` | If `true`, the workflow's triggering actor cannot approve. Requires `self-approval-slack-id`. |
 | `self-approval-slack-id` | no | — | Slack user id of the triggering actor (mapping is the caller's responsibility). |
 | `success-message-payload` | no | rendered block | Replaces the approval message on full approval. In standalone mode it replaces the entire message (base blocks included), so include any context you want to keep. Supports [template variables](#template-variables). |
 | `fail-message-payload` | no | rendered block | Replaces the approval message on reject/cancel/timeout. Same standalone-mode semantics as `success-message-payload`. Supports [template variables](#template-variables). |
-| `timeout-minutes` | no | `30` | Action-level approval timeout. **Independent of step-level `timeout-minutes:`** — whichever fires first wins. Always pass this with `with:` rather than relying on the step-level setting. |
+| `timeout-minutes` | no | `30` | Action-level approval timeout. **Independent of step-level `timeout-minutes:`** — whichever fires first wins. Always pass this with `with:` rather than relying on the step-level setting. Max `35791` (~24.8 days). |
 
 ### Template variables
 
@@ -146,7 +146,8 @@ jobs:
 - Reject reaches terminal after `minimum-reject-count` rejections (default 1).
 - SIGTERM / SIGINT / SIGBREAK → reply updated with the cancel block, job exits with code 1 (`result=canceled`).
 - Timeout → reply updated with the timed-out block, job exits with code 1 (`result=timed-out`).
-- A late button press after the terminal outcome is dropped.
+- Exactly one terminal outcome is applied: the first of approval threshold, rejection threshold, timeout, or cancel. Presses after that are dropped.
+- A click on another gate's message that reaches this gate is not counted; the clicker gets an ephemeral "click again" reply (see [Concurrent gates](#concurrent-gates)).
 - Slack API calls retry transient failures (HTTP 429 / 5xx / `ratelimited` / `ETIMEDOUT` / `ECONNRESET`) with jittered exponential backoff (up to 3 attempts).
 - `core.info` logs include each approve / reject event, threshold reached, and final outcome.
 
@@ -164,6 +165,19 @@ jobs:
 ```
 
 If you only set the step-level `timeout-minutes:` the action will still default to 30 minutes internally and exit early as `timed-out`.
+
+### Concurrent gates
+
+Each waiting gate holds its own Socket Mode connection to your Slack app.
+Slack delivers each button click to only **one** of the app's open
+connections, and allows at most 10 connections per app. When several gates
+wait at once on the same app (matrix legs, parallel jobs or workflows):
+
+- Gates never act on each other's clicks: every gate's buttons carry a unique id.
+- A click can reach the wrong gate. It is not counted, and the clicker gets an
+  ephemeral reply asking them to click again.
+- Keep fewer than 10 gates waiting at once per Slack app. If clicks often land
+  on the wrong gate, use a separate Slack app per environment.
 
 ## Contributing
 

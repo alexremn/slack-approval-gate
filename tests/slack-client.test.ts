@@ -112,6 +112,16 @@ describe("SlackClient", () => {
       }),
     );
   });
+  it("postEphemeral can target another channel", async () => {
+    const web = makeWeb();
+    web.chat.postEphemeral.mockResolvedValue({ ok: true });
+    const client = new SlackClient(web as any, "C1");
+    await client.postEphemeral("U1", "nope", undefined, "C2");
+    expect(web.chat.postEphemeral).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "C2", user: "U1", thread_ts: undefined }),
+    );
+  });
+
   it("postMain retries when web-api wraps a transient network error", async () => {
     const web = makeWeb();
     const err: any = new Error("A request error occurred: connect ETIMEDOUT");

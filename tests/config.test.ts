@@ -184,6 +184,50 @@ describe("loadConfig", () => {
     expect(c.selfApprovalSlackId).toBe(APPROVER_B);
   });
 
+  it("accepts the largest timeout-minutes a Node timer can hold", () => {
+    setInput("approvers", APPROVER_A);
+    setInput("timeout-minutes", "35791");
+    expect(loadConfig().timeoutMs).toBe(35791 * 60_000);
+  });
+
+  it("rejects timeout-minutes beyond the Node timer limit (would fire immediately)", () => {
+    setInput("approvers", APPROVER_A);
+    setInput("timeout-minutes", "35792");
+    expect(() => loadConfig()).toThrow(/timeout-minutes must be at most 35791/);
+  });
+
+  it("rejects a quorum that is unreachable once self-approval is blocked", () => {
+    setInput("approvers", `${APPROVER_A},${APPROVER_B}`);
+    setInput("minimum-approval-count", "2");
+    setInput("prevent-self-approval", "true");
+    setInput("self-approval-slack-id", APPROVER_A);
+    expect(() => loadConfig()).toThrow(/minimum-approval-count \(2\) is unreachable/);
+  });
+
+  it("accepts a quorum reachable without the self-approver", () => {
+    setInput("approvers", `${APPROVER_A},${APPROVER_B},${APPROVER_C}`);
+    setInput("minimum-approval-count", "2");
+    setInput("prevent-self-approval", "true");
+    setInput("self-approval-slack-id", APPROVER_A);
+    expect(loadConfig().minimumApprovalCount).toBe(2);
+  });
+
+  it("ignores self-approval-slack-id for quorum when prevent-self-approval is off", () => {
+    setInput("approvers", APPROVER_A);
+    setInput("self-approval-slack-id", APPROVER_A);
+    expect(() => loadConfig()).not.toThrow();
+  });
+
+  it("warns that prevent-self-approval is a no-op without self-approval-slack-id", () => {
+    setInput("approvers", APPROVER_A);
+    setInput("prevent-self-approval", "true");
+    const writes: string[] = [];
+    const spy = jest.spyOn(process.stdout, "write")
+      .mockImplementation((chunk: any) => { writes.push(String(chunk)); return true; });
+    try { loadConfig(); } finally { spy.mockRestore(); }
+    expect(writes.some(w => w.includes("check will be a no-op"))).toBe(true);
+  });
+
   it("rejects malformed self-approval-slack-id", () => {
     setInput("approvers", APPROVER_A);
     setInput("prevent-self-approval", "true");

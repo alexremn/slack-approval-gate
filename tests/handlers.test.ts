@@ -295,4 +295,158 @@ describe("registerHandlers", () => {
     expect((deps.slack as jest.Mocked<SlackClient>).updateApprovalReply).not.toHaveBeenCalled();
     expect(deps.onTerminal).not.toHaveBeenCalled();
   });
+
+  it("racing final approve and reject: only the first outcome updates and terminates", async () => {
+    const { app, deps, onTerminal } = makeDeps({
+      state: new ApprovalState(["u1", "u2"], 1),
+    });
+    registerHandlers(deps);
+    await Promise.all([
+      app.actions["slack-approval-approve"](makeBoltArgs("u1", "approve-id")),
+      app.actions["slack-approval-reject"](makeBoltArgs("u2", "reject-id")),
+    ]);
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+    expect(onTerminal).toHaveBeenCalledWith("approved");
+    expect((deps.slack as jest.Mocked<SlackClient>).updateApprovalReply).toHaveBeenCalledTimes(1);
+  });
+
+  it("presses after an outcome is claimed elsewhere (timeout/cancel) are dropped silently", async () => {
+    const { app, deps, onTerminal } = makeDeps({
+      state: new ApprovalState(["u1"], 1),
+      preventSelfApproval: true,
+      selfApprovalSlackId: "u1",
+    });
+    registerHandlers(deps);
+    deps.state.close();
+    await app.actions["slack-approval-approve"](makeBoltArgs("u1", "approve-id"));
+    await app.actions["slack-approval-reject"](makeBoltArgs("u1", "reject-id"));
+    expect((deps.slack as jest.Mocked<SlackClient>).postEphemeral).not.toHaveBeenCalled();
+    expect((deps.slack as jest.Mocked<SlackClient>).updateApprovalReply).not.toHaveBeenCalled();
+    expect(onTerminal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["slack-approval-approve"],
+    ["slack-approval-reject"],
+  ])("%s: click meant for another gate gets an ephemeral 'click again' in that message's channel/thread", async (actionId) => {
+    const { app, deps, onTerminal } = makeDeps();
+    registerHandlers(deps);
+    const args = {
+      ...makeBoltArgs("u1", "other-gate-id"),
+      body: { user: { id: "u1" }, channel: { id: "C2" }, message: { ts: "5.0", thread_ts: "4.0" } },
+    };
+    await app.actions[actionId](args);
+    expect(args.ack).toHaveBeenCalled();
+    expect((deps.slack as jest.Mocked<SlackClient>).postEphemeral).toHaveBeenCalledWith(
+      "u1", expect.stringMatching(/different approval gate.*click again/is), "4.0", "C2",
+    );
+    expect((deps.slack as jest.Mocked<SlackClient>).updateApprovalReply).not.toHaveBeenCalled();
+    expect(onTerminal).not.toHaveBeenCalled();
+    expect(deps.state.getApprovers()).toEqual([]);
+    expect(deps.state.getRejecters()).toEqual([]);
+  });
+
+  it("misrouted click is still reported after this gate has finished", async () => {
+    const { app, deps } = makeDeps();
+    registerHandlers(deps);
+    deps.state.close();
+    await app.actions["slack-approval-approve"]({
+      ...makeBoltArgs("u1", "other-gate-id"),
+      body: { user: { id: "u1" }, channel: { id: "C2" }, message: { ts: "5.0" } },
+    });
+    expect((deps.slack as jest.Mocked<SlackClient>).postEphemeral).toHaveBeenCalledWith(
+      "u1", expect.any(String), undefined, "C2",
+    );
+  });
+
+  it("misrouted click notice failure is logged, not thrown", async () => {
+    const { app, deps } = makeDeps();
+    (deps.slack as jest.Mocked<SlackClient>).postEphemeral.mockRejectedValueOnce(new Error("slack down"));
+    registerHandlers(deps);
+    const args = {
+      ...makeBoltArgs("u1", "other-gate-id"),
+      body: { user: { id: "u1" }, channel: { id: "C2" } },
+    };
+    await expect(app.actions["slack-approval-approve"](args)).resolves.toBeUndefined();
+    expect(args.logger.error).toHaveBeenCalled();
+  });
+
+  it("reject: already-rejected user gets ephemeral on second click", async () => {
+    const { app, deps, onTerminal } = makeDeps({
+      state: new ApprovalState(["u1", "u2"], 2, 2),
+    });
+    registerHandlers(deps);
+    await app.actions["slack-approval-reject"](makeBoltArgs("u1", "reject-id"));
+    await app.actions["slack-approval-reject"](makeBoltArgs("u1", "reject-id"));
+    expect((deps.slack as jest.Mocked<SlackClient>).postEphemeral).toHaveBeenCalledWith(
+      "u1", expect.stringMatching(/already rejected/i), "2.0",
+    );
+    expect(deps.state.getRejecters()).toEqual(["u1"]);
+    expect(onTerminal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["slack-approval-approve", "approve-id"],
+    ["slack-approval-reject", "reject-id"],
+  ])("%s: progress update failure is logged and the gate keeps waiting", async (actionId, value) => {
+    const { app, deps, onTerminal } = makeDeps({
+      state: new ApprovalState(["u1", "u2"], 2, 2),
+    });
+    (deps.slack as jest.Mocked<SlackClient>).updateApprovalReply.mockRejectedValueOnce(new Error("slack down"));
+    registerHandlers(deps);
+    const args = makeBoltArgs("u1", value);
+    await app.actions[actionId](args);
+    expect(args.logger.error).toHaveBeenCalled();
+    expect(onTerminal).not.toHaveBeenCalled();
+    expect(deps.state.isClosed()).toBe(false);
+  });
+
+  it.each([
+    ["slack-approval-approve", "approve-id"],
+    ["slack-approval-reject", "reject-id"],
+  ])("%s: failing 'not authorized' ephemeral is logged, not thrown", async (actionId, value) => {
+    const { app, deps } = makeDeps();
+    (deps.slack as jest.Mocked<SlackClient>).postEphemeral.mockRejectedValueOnce(new Error("slack down"));
+    registerHandlers(deps);
+    const args = makeBoltArgs("intruder", value);
+    await expect(app.actions[actionId](args)).resolves.toBeUndefined();
+    expect(args.logger.error).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["slack-approval-approve", "approve-id", "successPayload", ["approved"]],
+    ["slack-approval-reject", "reject-id", "failPayload", ["rejected", "u1"]],
+  ] as const)("%s: a final payload that fails to render still terminates the gate", async (actionId, value, key, expected) => {
+    const broken: Record<string, unknown> = { text: "x" };
+    broken.self = broken; // JSON.stringify throws on cycles
+    const { app, deps, onTerminal } = makeDeps({
+      state: new ApprovalState(["u1"], 1),
+      [key]: broken,
+    });
+    registerHandlers(deps);
+    const args = makeBoltArgs("u1", value);
+    await app.actions[actionId](args);
+    expect(args.logger.error).toHaveBeenCalled();
+    expect(onTerminal).toHaveBeenCalledWith(...expected);
+  });
+
+  it("reject: terminal update failure does not block onTerminal", async () => {
+    const { app, deps, onTerminal } = makeDeps();
+    (deps.slack as jest.Mocked<SlackClient>).updateApprovalReply.mockRejectedValueOnce(new Error("slack down"));
+    registerHandlers(deps);
+    await app.actions["slack-approval-reject"](makeBoltArgs("u1", "reject-id"));
+    expect(onTerminal).toHaveBeenCalledWith("rejected", "u1");
+  });
+
+  it("non-button actions are ignored", async () => {
+    const { app, deps, onTerminal } = makeDeps();
+    registerHandlers(deps);
+    await app.actions["slack-approval-approve"]({
+      ...makeBoltArgs("u1", "approve-id"),
+      action: { type: "static_select", value: "approve-id" },
+    });
+    expect((deps.slack as jest.Mocked<SlackClient>).postEphemeral).not.toHaveBeenCalled();
+    expect(deps.state.getApprovers()).toEqual([]);
+    expect(onTerminal).not.toHaveBeenCalled();
+  });
 });

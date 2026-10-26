@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as core from "@actions/core";
 import { App, LogLevel } from "@slack/bolt";
 import { WebClient } from "@slack/web-api";
@@ -32,7 +33,9 @@ async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise
 async function main(): Promise<void> {
   const config = loadConfig();
   const ghCtx = readGithubContext();
-  const aidSeed = `${ghCtx.repo}-${ghCtx.workflow}-${ghCtx.runId}-${ghCtx.runNumber}-${ghCtx.runAttempt}`;
+  // The nonce keeps button ids unique per gate: matrix legs and parallel jobs
+  // share every run-level value, and must never act on each other's clicks.
+  const aidSeed = `${ghCtx.repo}-${ghCtx.workflow}-${ghCtx.runId}-${ghCtx.runNumber}-${ghCtx.runAttempt}-${randomUUID()}`;
   const approveActionId = mintActionId(`approve:${aidSeed}`);
   const rejectActionId = mintActionId(`reject:${aidSeed}`);
 
@@ -88,7 +91,6 @@ async function main(): Promise<void> {
     logLevel: LogLevel.INFO,
   });
 
-  let shuttingDown = false;
   let timeoutHandle: NodeJS.Timeout | undefined;
 
   const shutdown = async (
@@ -121,9 +123,9 @@ async function main(): Promise<void> {
     selfApprovalSlackId: config.selfApprovalSlackId,
     baseBlocks,
     baseText,
+    // Handlers call this only after state closed on their vote, so the
+    // outcome is already claimed.
     onTerminal: async (outcome) => {
-      if (shuttingDown) return;
-      shuttingDown = true;
       const code = outcome === "approved" ? 0 : 1;
       await shutdown(outcome, code);
     },
@@ -138,8 +140,7 @@ async function main(): Promise<void> {
   };
 
   const onCancel = async (): Promise<void> => {
-    if (shuttingDown) return;
-    shuttingDown = true;
+    if (!state.close()) return;
     try {
       // Custom payload replaces the whole message; only the default
       // rendered status gets the standalone base blocks prepended.
@@ -160,8 +161,7 @@ async function main(): Promise<void> {
   process.on("SIGBREAK" as NodeJS.Signals, onCancel);
 
   timeoutHandle = setTimeout(async () => {
-    if (shuttingDown) return;
-    shuttingDown = true;
+    if (!state.close()) return;
     try {
       const status: MessagePayload = hasPayload(config.failMessagePayload)
         ? substituteTemplateVars(config.failMessagePayload as MessagePayload, {
@@ -181,8 +181,7 @@ async function main(): Promise<void> {
     await app.start();
   } catch (e) {
     core.error(`Bolt app.start failed: ${(e as Error).message}`);
-    if (!shuttingDown) {
-      shuttingDown = true;
+    if (state.close()) {
       try {
         await slack.updateApprovalReply(
           approvalMessageTs,

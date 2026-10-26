@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import type { App } from "@slack/bolt";
+import type { App, Logger } from "@slack/bolt";
 import type { ApprovalState } from "./approval-state";
 import type { SlackClient } from "./slack-client";
 import {
@@ -27,6 +27,15 @@ export interface HandlersDeps {
   baseText?: string;
   onTerminal: (outcome: Outcome, rejectedBy?: string) => Promise<void>;
 }
+
+interface ClickBody {
+  user: { id: string };
+  channel?: { id: string };
+  message?: { thread_ts?: string };
+}
+
+const MISROUTED_TEXT =
+  "This click reached a different approval gate and was not counted. If the request is still pending, click again.";
 
 function buildReplyState(
   state: ApprovalState,
@@ -68,14 +77,30 @@ export function registerHandlers(deps: HandlersDeps): void {
     };
   };
 
-  let terminalFired = false;
+  // Socket Mode hands each click to just one of the app's open connections,
+  // so a gate can receive clicks on another concurrently running gate's
+  // message. Tell the clicker it was not counted instead of dropping it.
+  const notifyMisrouted = async (click: ClickBody, logger: Logger): Promise<void> => {
+    if (!click.channel?.id) return;
+    core.info(`Click by ${click.user.id} belongs to another approval gate; asked them to retry`);
+    try {
+      await slack.postEphemeral(click.user.id, MISROUTED_TEXT, click.message?.thread_ts, click.channel.id);
+    } catch (e) {
+      logger.error(e as Error);
+    }
+  };
 
   app.action("slack-approval-approve", async ({ ack, body, action, logger }) => {
     await ack();
-    if (terminalFired) return;
-    if (action.type !== "button" || (action as { type: string; value?: string }).value !== approveActionId) return;
+    if (action.type !== "button") return;
+    const click = body as ClickBody;
+    if ((action as { value?: string }).value !== approveActionId) {
+      await notifyMisrouted(click, logger);
+      return;
+    }
+    if (state.isClosed()) return;
 
-    const userId = (body as { user: { id: string } }).user.id;
+    const userId = click.user.id;
 
     try {
       if (preventSelfApproval && selfApprovalSlackId && userId === selfApprovalSlackId) {
@@ -89,6 +114,7 @@ export function registerHandlers(deps: HandlersDeps): void {
       }
 
       const result = await state.tryApprove(userId);
+      if (result === "closed") return;
       if (result === "not-authorized") {
         core.info(`Unauthorized approve attempt by ${userId}`);
         await slack.postEphemeral(
@@ -124,16 +150,17 @@ export function registerHandlers(deps: HandlersDeps): void {
       }
       // result === "approved"
       core.info(`Approval threshold reached; final approver ${userId}`);
-      terminalFired = true;
-      // Custom payload replaces the whole message; only the default
-      // rendered status gets the standalone base blocks prepended.
-      const finalPayload = hasPayload(successPayload)
-        ? substituteTemplateVars(successPayload, {
-            approvers: state.getApprovers(),
-            rejecters: state.getRejecters(),
-          })
-        : mergeUpdate({ blocks: renderFinalStatus("approved", state.getApprovers()) });
+      // State is closed now and timeout/cancel will bail out, so nothing may
+      // stand between here and onTerminal: render and update inside the try.
       try {
+        // Custom payload replaces the whole message; only the default
+        // rendered status gets the standalone base blocks prepended.
+        const finalPayload = hasPayload(successPayload)
+          ? substituteTemplateVars(successPayload, {
+              approvers: state.getApprovers(),
+              rejecters: state.getRejecters(),
+            })
+          : mergeUpdate({ blocks: renderFinalStatus("approved", state.getApprovers()) });
         await slack.updateApprovalReply(approvalMessageTs, finalPayload);
       } catch (e) {
         logger.error(e as Error);
@@ -146,12 +173,18 @@ export function registerHandlers(deps: HandlersDeps): void {
 
   app.action("slack-approval-reject", async ({ ack, body, action, logger }) => {
     await ack();
-    if (terminalFired) return;
-    if (action.type !== "button" || (action as { type: string; value?: string }).value !== rejectActionId) return;
+    if (action.type !== "button") return;
+    const click = body as ClickBody;
+    if ((action as { value?: string }).value !== rejectActionId) {
+      await notifyMisrouted(click, logger);
+      return;
+    }
+    if (state.isClosed()) return;
 
-    const userId = (body as { user: { id: string } }).user.id;
+    const userId = click.user.id;
     try {
       const result = await state.tryReject(userId);
+      if (result === "closed") return;
       if (result === "not-authorized") {
         core.info(`Unauthorized reject attempt by ${userId}`);
         await slack.postEphemeral(
@@ -187,14 +220,13 @@ export function registerHandlers(deps: HandlersDeps): void {
       }
       // result === "rejected"
       core.info(`Rejection threshold reached; final rejecter ${userId}`);
-      terminalFired = true;
-      const finalPayload = hasPayload(failPayload)
-        ? substituteTemplateVars(failPayload, {
-            approvers: state.getApprovers(),
-            rejecters: state.getRejecters(),
-          })
-        : mergeUpdate({ blocks: renderFinalStatus("rejected", state.getApprovers(), userId) });
       try {
+        const finalPayload = hasPayload(failPayload)
+          ? substituteTemplateVars(failPayload, {
+              approvers: state.getApprovers(),
+              rejecters: state.getRejecters(),
+            })
+          : mergeUpdate({ blocks: renderFinalStatus("rejected", state.getApprovers(), userId) });
         await slack.updateApprovalReply(approvalMessageTs, finalPayload);
       } catch (e) {
         logger.error(e as Error);

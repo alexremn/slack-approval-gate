@@ -115,6 +115,25 @@ describe("defaultMainPayload", () => {
     expect(text).toContain("feature/&lt;x&gt;");
   });
 
+  it("percent-encodes the branch in the link URL so it cannot break out of the link", () => {
+    const p = defaultMainPayload({ ...baseCtx, refName: "x>|<https://evil.example|ok" });
+    const fields = (p.blocks![1] as any).fields as Array<{ text: string }>;
+    const branch = fields.find(f => f.text.startsWith("*Branch*"))!.text;
+    expect(branch).toContain("/tree/x%3E%7C%3Chttps%3A//evil.example%7Cok|");
+    expect(branch.split("<")).toHaveLength(2);
+    expect(branch.split(">")).toHaveLength(2);
+  });
+
+  it("keeps slashes in branch URLs", () => {
+    const p = defaultMainPayload({ ...baseCtx, refName: "feature/x" });
+    expect(JSON.stringify(p.blocks)).toContain("/tree/feature/x|feature/x>");
+  });
+
+  it("escapes workflow and repo in the notification fallback text", () => {
+    const p = defaultMainPayload({ ...baseCtx, workflow: "<!channel> deploy & go" });
+    expect(p.text).toBe("Approval required: &lt;!channel&gt; deploy &amp; go in owner/repo");
+  });
+
   it("uses a Unicode header so all Slack clients render it", () => {
     const p = defaultMainPayload(baseCtx);
     expect((p.blocks![0] as any).text.text).toContain("🔒");

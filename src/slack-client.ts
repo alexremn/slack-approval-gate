@@ -89,10 +89,15 @@ export class SlackClient {
     );
   }
 
-  async postEphemeral(user: string, text: string, threadTs?: string): Promise<void> {
+  async postEphemeral(
+    user: string,
+    text: string,
+    threadTs?: string,
+    channel = this.channel,
+  ): Promise<void> {
     await withRetry(() =>
       this.web.chat.postEphemeral({
-        channel: this.channel,
+        channel,
         user,
         text,
         thread_ts: threadTs,

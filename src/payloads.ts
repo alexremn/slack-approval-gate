@@ -62,9 +62,11 @@ export function defaultMainPayload(ctx: GithubContext): MessagePayload {
     },
   ];
   if (ctx.refName) {
+    // Ref names may contain `<`, `>` and `|`, which would break out of the link.
+    const refPath = ctx.refName.split("/").map(encodeURIComponent).join("/");
     fields.push({
       type: "mrkdwn",
-      text: `*Branch*\n<${repoUrl}/tree/${ctx.refName}|${escapeMrkdwn(ctx.refName)}>`,
+      text: `*Branch*\n<${repoUrl}/tree/${refPath}|${escapeMrkdwn(ctx.refName)}>`,
     });
   }
   if (ctx.sha) {
@@ -76,7 +78,7 @@ export function defaultMainPayload(ctx: GithubContext): MessagePayload {
   }
 
   return {
-    text: `Approval required: ${ctx.workflow} in ${ctx.repo}`,
+    text: `Approval required: ${escapeMrkdwn(ctx.workflow)} in ${escapeMrkdwn(ctx.repo)}`,
     blocks: [
       {
         type: "header",
