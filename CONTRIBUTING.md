@@ -20,7 +20,10 @@ Requires Node.js `>=24` (see `engines` in `package.json`).
 3. Add or update tests. The suite must stay green.
 4. **Rebuild `dist/`** if you touched anything under `src/`. The action runs the
    committed bundle (`dist/index.js`), so a stale `dist/` ships broken code.
-   CI fails when `dist/` is out of sync with `src/`.
+   CI fails when `dist/` is out of sync with `src/`. Dependabot PRs get `dist/`
+   rebuilt by the *Rebuild dist for Dependabot* workflow; CI on that commit
+   waits for **Approve workflows to run** in the PR. Dependabot stops
+   rebasing a PR that has that commit; comment `@dependabot recreate` if needed.
 5. Run `npm test` and `npm run typecheck` before pushing.
 6. Open a PR using the template. Describe the change and link any issue.
 
