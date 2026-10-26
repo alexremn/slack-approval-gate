@@ -176,9 +176,13 @@ export function loadConfig(): Config {
       `minimum-approval-count (${minimumApprovalCount}) is unreachable: self-approval by ${selfApprovalSlackId} is blocked, leaving ${approvers.length - 1} eligible approver(s)`,
     );
   }
+  // Run anyway (e.g. actors with no Slack mapping), but loudly: a titled
+  // annotation on the run, so nobody assumes the check is active.
   if (preventSelfApproval && !selfApprovalSlackId) {
+    const actor = process.env.GITHUB_ACTOR || "the triggering actor";
     core.warning(
-      "prevent-self-approval is true but self-approval-slack-id is empty; check will be a no-op",
+      `prevent-self-approval is on but self-approval-slack-id is empty, so self-approval is NOT blocked: ${actor} can approve this run. Pass ${actor}'s Slack user id in self-approval-slack-id to enforce it.`,
+      { title: "Self-approval not prevented" },
     );
   }
 

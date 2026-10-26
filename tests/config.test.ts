@@ -218,14 +218,35 @@ describe("loadConfig", () => {
     expect(() => loadConfig()).not.toThrow();
   });
 
-  it("warns that prevent-self-approval is a no-op without self-approval-slack-id", () => {
-    setInput("approvers", APPROVER_A);
-    setInput("prevent-self-approval", "true");
+  function captureStdout(fn: () => void): string {
     const writes: string[] = [];
     const spy = jest.spyOn(process.stdout, "write")
       .mockImplementation((chunk: any) => { writes.push(String(chunk)); return true; });
-    try { loadConfig(); } finally { spy.mockRestore(); }
-    expect(writes.some(w => w.includes("check will be a no-op"))).toBe(true);
+    try { fn(); } finally { spy.mockRestore(); }
+    return writes.join("");
+  }
+
+  it.each([
+    ["empty", ""],
+    ["whitespace-only", "   "],
+  ])("prevent-self-approval with %s self-approval-slack-id runs, with a titled warning naming the actor", (_label, id) => {
+    setInput("approvers", APPROVER_A);
+    setInput("prevent-self-approval", "true");
+    setInput("self-approval-slack-id", id);
+    process.env.GITHUB_ACTOR = "alice";
+    let c: ReturnType<typeof loadConfig> | undefined;
+    const out = captureStdout(() => { c = loadConfig(); });
+    expect(c!.preventSelfApproval).toBe(true);
+    expect(c!.selfApprovalSlackId).toBe("");
+    expect(out).toContain("::warning title=Self-approval not prevented::");
+    expect(out).toMatch(/self-approval is NOT blocked: alice can approve this run/);
+  });
+
+  it("does not warn when self-approval-slack-id is set", () => {
+    setInput("approvers", APPROVER_A);
+    setInput("prevent-self-approval", "true");
+    setInput("self-approval-slack-id", APPROVER_B);
+    expect(captureStdout(() => loadConfig())).not.toContain("Self-approval not prevented");
   });
 
   it("rejects malformed self-approval-slack-id", () => {

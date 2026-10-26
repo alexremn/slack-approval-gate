@@ -51,7 +51,7 @@ Create a Slack App in your workspace with this manifest:
 | `approvers` | yes | — | Comma-separated Slack user IDs (`U…`/`W…`). |
 | `minimum-approval-count` | no | `1` | Approvals needed. Must be a positive integer and `≤ approvers.length`. With `prevent-self-approval`, it must also be reachable without the triggering actor. |
 | `minimum-reject-count` | no | `1` | Rejections needed. Must be a positive integer and `≤ approvers.length`. |
-| `prevent-self-approval` | no | `false` | If `true`, the workflow's triggering actor cannot approve. Requires `self-approval-slack-id`. |
+| `prevent-self-approval` | no | `false` | If `true`, the workflow's triggering actor cannot approve. Requires `self-approval-slack-id`. If that is empty, the run continues **without** the check and shows a "Self-approval not prevented" warning naming the actor. |
 | `self-approval-slack-id` | no | — | Slack user id of the triggering actor (mapping is the caller's responsibility). |
 | `success-message-payload` | no | rendered block | Replaces the approval message on full approval. In standalone mode it replaces the entire message (base blocks included), so include any context you want to keep. Supports [template variables](#template-variables). |
 | `fail-message-payload` | no | rendered block | Replaces the approval message on reject/cancel/timeout. Same standalone-mode semantics as `success-message-payload`. Supports [template variables](#template-variables). |
@@ -142,6 +142,7 @@ jobs:
 - Approve / reject buttons live on the approval reply.
 - Non-approver click → ephemeral "not authorized" reply to that user (approve and reject both).
 - Double-approve / double-reject click → ephemeral "already approved/rejected".
+- A user's latest vote counts: rejecting after approving withdraws the approval, and approving after rejecting withdraws the rejection. `approvers-json` / `approvals-json` list only approvals still standing.
 - Self-approval, when `prevent-self-approval=true` and the clicker's Slack id matches `self-approval-slack-id`, is blocked with an ephemeral reply.
 - Reject reaches terminal after `minimum-reject-count` rejections (default 1).
 - SIGTERM / SIGINT / SIGBREAK → reply updated with the cancel block, job exits with code 1 (`result=canceled`).
@@ -149,6 +150,7 @@ jobs:
 - Exactly one terminal outcome is applied: the first of approval threshold, rejection threshold, timeout, or cancel. Presses after that are dropped.
 - A click on another gate's message that reaches this gate is not counted; the clicker gets an ephemeral "click again" reply (see [Concurrent gates](#concurrent-gates)).
 - Slack API calls retry transient failures (HTTP 429 / 5xx / `ratelimited` / `ETIMEDOUT` / `ECONNRESET`) with jittered exponential backoff (up to 3 attempts).
+- Each Slack request is aborted after 10 s and retried at most twice, so a stalled or failing Slack API gives up within about two minutes and the run still ends with its outcome. Rate-limit pauses follow Slack's `Retry-After`.
 - `core.info` logs include each approve / reject event, threshold reached, and final outcome.
 
 ### Timeout caveat
@@ -176,6 +178,9 @@ wait at once on the same app (matrix legs, parallel jobs or workflows):
 - Gates never act on each other's clicks: every gate's buttons carry a unique id.
 - A click can reach the wrong gate. It is not counted, and the clicker gets an
   ephemeral reply asking them to click again.
+- Buttons left behind by a run that died without cleanup look live until that
+  gate's `timeout-minutes` passes. After that, a running gate that receives a
+  click on them replies "no longer active" instead of "click again".
 - Keep fewer than 10 gates waiting at once per Slack app. If clicks often land
   on the wrong gate, use a separate Slack app per environment.
 

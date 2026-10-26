@@ -1,5 +1,14 @@
-import type { WebClient } from "@slack/web-api";
+import type { WebClient, WebClientOptions } from "@slack/web-api";
 import type { KnownBlock } from "@slack/types";
+
+// web-api defaults to no request timeout and ~30 min of retries, so a stalled
+// Slack call could block the final update long past the decision. Abort each
+// request after 10 s and retry twice: a stalled or failing call now gives up
+// within ~2 minutes. Rate limits still wait out Slack's Retry-After per attempt.
+export const WEB_CLIENT_OPTIONS: WebClientOptions = {
+  timeout: 10_000,
+  retryConfig: { retries: 2 },
+};
 
 export interface UpdatePayload {
   text?: string;

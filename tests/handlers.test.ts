@@ -346,6 +346,39 @@ describe("registerHandlers", () => {
     expect(deps.state.getRejecters()).toEqual([]);
   });
 
+  it("click on a button whose gate is past its deadline gets an 'expired' notice, not 'click again'", async () => {
+    const { app, deps } = makeDeps();
+    registerHandlers(deps);
+    await app.actions["slack-approval-approve"]({
+      ...makeBoltArgs("u1", `deadbeefdeadbeef.${Date.now() - 1000}`),
+      body: { user: { id: "u1" }, channel: { id: "C2" } },
+    });
+    const text = (deps.slack as jest.Mocked<SlackClient>).postEphemeral.mock.calls[0][1];
+    expect(text).toMatch(/no longer active/i);
+    expect(text).not.toMatch(/click again/i);
+  });
+
+  it("click on a live gate's button that reached this gate asks to click again", async () => {
+    const { app, deps } = makeDeps();
+    registerHandlers(deps);
+    await app.actions["slack-approval-reject"]({
+      ...makeBoltArgs("u1", `deadbeefdeadbeef.${Date.now() + 60_000}`),
+      body: { user: { id: "u1" }, channel: { id: "C2" } },
+    });
+    expect((deps.slack as jest.Mocked<SlackClient>).postEphemeral.mock.calls[0][1]).toMatch(/click again/i);
+  });
+
+  it("switching from approve to reject drops the user from 'Approved by'", async () => {
+    const { app, deps } = makeDeps({ state: new ApprovalState(["u1", "u2"], 2, 2) });
+    registerHandlers(deps);
+    const upd = (deps.slack as jest.Mocked<SlackClient>).updateApprovalReply;
+    await app.actions["slack-approval-approve"](makeBoltArgs("u1", "approve-id"));
+    expect(JSON.stringify(upd.mock.calls[0][1])).toContain("Approved by:* <@u1>");
+    await app.actions["slack-approval-reject"](makeBoltArgs("u1", "reject-id"));
+    expect(JSON.stringify(upd.mock.calls[1][1])).not.toContain("Approved by");
+    expect(deps.state.getRejecters()).toEqual(["u1"]);
+  });
+
   it("misrouted click is still reported after this gate has finished", async () => {
     const { app, deps } = makeDeps();
     registerHandlers(deps);

@@ -57,7 +57,8 @@ inputs:
     description: |
       If "true", the GitHub actor who triggered the run cannot approve when their
       Slack user id appears in `approvers`. Requires explicit Slack id mapping via
-      `self-approval-slack-id` input.
+      `self-approval-slack-id` input; if it is empty, the check is skipped with a
+      "Self-approval not prevented" warning.
     required: false
     default: "false"
   self-approval-slack-id:

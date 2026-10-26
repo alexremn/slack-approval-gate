@@ -1,4 +1,5 @@
-import { SlackClient } from "../src/slack-client";
+import { LogLevel, WebClient } from "@slack/web-api";
+import { SlackClient, WEB_CLIENT_OPTIONS } from "../src/slack-client";
 
 function makeWeb() {
   return {
@@ -120,6 +121,28 @@ describe("SlackClient", () => {
     expect(web.chat.postEphemeral).toHaveBeenCalledWith(
       expect.objectContaining({ channel: "C2", user: "U1", thread_ts: undefined }),
     );
+  });
+
+  it("a Slack request that never answers is aborted and fails after bounded attempts", async () => {
+    expect(WEB_CLIENT_OPTIONS.timeout).toBeGreaterThan(0);
+    const retries = (WEB_CLIENT_OPTIONS.retryConfig as { retries: number }).retries;
+    const hangingFetch = jest.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_, reject) => {
+          init.signal!.addEventListener("abort", () => reject(init.signal!.reason));
+        }),
+    );
+    const web = new WebClient("xoxb-test", {
+      ...WEB_CLIENT_OPTIONS,
+      // Same retry count, shrunk timings so the test runs in milliseconds.
+      timeout: 20,
+      retryConfig: { ...WEB_CLIENT_OPTIONS.retryConfig, minTimeout: 0, maxTimeout: 0 },
+      fetch: hangingFetch as unknown as typeof fetch,
+      logLevel: LogLevel.ERROR,
+    });
+    const client = new SlackClient(web, "C1");
+    await expect(client.updateApprovalReply("1.0", { text: "x" })).rejects.toThrow();
+    expect(hangingFetch).toHaveBeenCalledTimes(retries + 1);
   });
 
   it("postMain retries when web-api wraps a transient network error", async () => {

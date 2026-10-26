@@ -51,6 +51,8 @@ export class ApprovalState {
       if (this.closed) return "closed";
       if (this.approvals.some(a => a.user === userId)) return "already-approved";
       if (!this.eligible.has(userId)) return "not-authorized";
+      // A user's latest vote counts: approving withdraws an earlier rejection.
+      this.rejections = this.rejections.filter(r => r.user !== userId);
       this.approvals.push({ user: userId, ts: Date.now() });
       if (this.approvals.length < this.minimum) return "remaining";
       this.closed = true;
@@ -63,6 +65,8 @@ export class ApprovalState {
       if (this.closed) return "closed";
       if (this.rejections.some(r => r.user === userId)) return "already-rejected";
       if (!this.eligible.has(userId)) return "not-authorized";
+      // A user's latest vote counts: rejecting withdraws an earlier approval.
+      this.approvals = this.approvals.filter(a => a.user !== userId);
       this.rejections.push({ user: userId, ts: Date.now() });
       if (this.rejections.length < this.minimumRejects) return "remaining";
       this.closed = true;

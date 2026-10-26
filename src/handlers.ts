@@ -2,6 +2,7 @@ import * as core from "@actions/core";
 import type { App, Logger } from "@slack/bolt";
 import type { ApprovalState } from "./approval-state";
 import type { SlackClient } from "./slack-client";
+import { isExpiredActionId } from "./action-id";
 import {
   hasPayload,
   renderApprovalReply,
@@ -36,6 +37,8 @@ interface ClickBody {
 
 const MISROUTED_TEXT =
   "This click reached a different approval gate and was not counted. If the request is still pending, click again.";
+const EXPIRED_TEXT =
+  "This approval request is no longer active (its run timed out or ended), so the click was not counted.";
 
 function buildReplyState(
   state: ApprovalState,
@@ -80,11 +83,19 @@ export function registerHandlers(deps: HandlersDeps): void {
   // Socket Mode hands each click to just one of the app's open connections,
   // so a gate can receive clicks on another concurrently running gate's
   // message. Tell the clicker it was not counted instead of dropping it.
-  const notifyMisrouted = async (click: ClickBody, logger: Logger): Promise<void> => {
+  // Buttons left live by a run killed without cleanup carry a past deadline;
+  // say so instead of asking for a retry that can never land.
+  const notifyMisrouted = async (click: ClickBody, value: string, logger: Logger): Promise<void> => {
     if (!click.channel?.id) return;
-    core.info(`Click by ${click.user.id} belongs to another approval gate; asked them to retry`);
+    const expired = isExpiredActionId(value);
+    core.info(`Click by ${click.user.id} belongs to ${expired ? "an expired" : "another"} approval gate`);
     try {
-      await slack.postEphemeral(click.user.id, MISROUTED_TEXT, click.message?.thread_ts, click.channel.id);
+      await slack.postEphemeral(
+        click.user.id,
+        expired ? EXPIRED_TEXT : MISROUTED_TEXT,
+        click.message?.thread_ts,
+        click.channel.id,
+      );
     } catch (e) {
       logger.error(e as Error);
     }
@@ -94,8 +105,9 @@ export function registerHandlers(deps: HandlersDeps): void {
     await ack();
     if (action.type !== "button") return;
     const click = body as ClickBody;
-    if ((action as { value?: string }).value !== approveActionId) {
-      await notifyMisrouted(click, logger);
+    const value = (action as { value?: string }).value ?? "";
+    if (value !== approveActionId) {
+      await notifyMisrouted(click, value, logger);
       return;
     }
     if (state.isClosed()) return;
@@ -175,8 +187,9 @@ export function registerHandlers(deps: HandlersDeps): void {
     await ack();
     if (action.type !== "button") return;
     const click = body as ClickBody;
-    if ((action as { value?: string }).value !== rejectActionId) {
-      await notifyMisrouted(click, logger);
+    const value = (action as { value?: string }).value ?? "";
+    if (value !== rejectActionId) {
+      await notifyMisrouted(click, value, logger);
       return;
     }
     if (state.isClosed()) return;

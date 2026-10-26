@@ -14,7 +14,7 @@ import {
   type Outcome,
 } from "./payloads";
 import { ApprovalState } from "./approval-state";
-import { SlackClient } from "./slack-client";
+import { SlackClient, WEB_CLIENT_OPTIONS } from "./slack-client";
 import { mintActionId } from "./action-id";
 import { registerHandlers } from "./handlers";
 
@@ -36,10 +36,11 @@ async function main(): Promise<void> {
   // The nonce keeps button ids unique per gate: matrix legs and parallel jobs
   // share every run-level value, and must never act on each other's clicks.
   const aidSeed = `${ghCtx.repo}-${ghCtx.workflow}-${ghCtx.runId}-${ghCtx.runNumber}-${ghCtx.runAttempt}-${randomUUID()}`;
-  const approveActionId = mintActionId(`approve:${aidSeed}`);
-  const rejectActionId = mintActionId(`reject:${aidSeed}`);
+  const deadline = Date.now() + config.timeoutMs;
+  const approveActionId = mintActionId(`approve:${aidSeed}`, deadline);
+  const rejectActionId = mintActionId(`reject:${aidSeed}`, deadline);
 
-  const web = new WebClient(config.slackBotToken);
+  const web = new WebClient(config.slackBotToken, WEB_CLIENT_OPTIONS);
   const slack = new SlackClient(web, config.channelId);
 
   const state = new ApprovalState(

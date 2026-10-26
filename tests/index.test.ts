@@ -1,5 +1,8 @@
 // src/index.ts runs main() on import, so each test loads it in an isolated
 // module registry with Slack, timers, process.exit and signals mocked.
+// Loading happens inside the test body (the first one also pays the ts-jest
+// compile), so allow more than the 5 s default on a busy machine.
+jest.setTimeout(30_000);
 
 type Handler = (args: unknown) => Promise<void>;
 
@@ -11,6 +14,7 @@ interface MockApp {
 }
 
 const mockApps: MockApp[] = [];
+const mockWebClientArgs: unknown[][] = [];
 let mockStartError: Error | undefined;
 const mockChat = {
   postMessage: jest.fn(),
@@ -25,9 +29,17 @@ const mockCore = {
   error: jest.fn(),
 };
 
-jest.mock("@actions/core", () => ({ ...jest.requireActual("@actions/core"), ...mockCore }));
+// Real getInput (pure over process.env); loaded once, not per isolated registry.
+let mockActualCore: typeof import("@actions/core") | undefined;
+jest.mock("@actions/core", () => ({
+  ...(mockActualCore ??= jest.requireActual<typeof import("@actions/core")>("@actions/core")),
+  ...mockCore,
+}));
 jest.mock("@slack/web-api", () => ({
-  WebClient: jest.fn().mockImplementation(() => ({ chat: mockChat })),
+  WebClient: jest.fn().mockImplementation((...args: unknown[]) => {
+    mockWebClientArgs.push(args);
+    return { chat: mockChat };
+  }),
 }));
 jest.mock("@slack/bolt", () => ({
   LogLevel: { INFO: "info" },
@@ -123,6 +135,7 @@ function lastUpdateText(): string {
 beforeEach(() => {
   jest.useFakeTimers({ doNotFake: ["setImmediate", "nextTick", "queueMicrotask"] });
   mockApps.length = 0;
+  mockWebClientArgs.length = 0;
   mockStartError = undefined;
   mockChat.postMessage.mockResolvedValue({ ts: "1.0" });
   mockChat.update.mockResolvedValue({ ok: true });
@@ -158,6 +171,17 @@ describe("entrypoint", () => {
     expect(msg.blocks.some((b: { type: string }) => b.type === "actions")).toBe(true);
     expect(outputs()).toMatchObject({ "main-message-ts": "1.0", "approval-message-ts": "1.0" });
     expect(app.opts).toMatchObject({ token: "xoxb-test", appToken: "xapp-test", socketMode: true });
+    expect(mockWebClientArgs).toEqual([
+      ["xoxb-test", expect.objectContaining({ timeout: expect.any(Number), retryConfig: expect.any(Object) })],
+    ]);
+  });
+
+  it("button values carry the gate's deadline so other gates can spot expired buttons", async () => {
+    await startGate({ "timeout-minutes": "5" });
+    const { approve, reject } = buttonValues(mockChat.postMessage.mock.calls[0][0]);
+    expect(approve).toMatch(/^[0-9a-f]{16}\.\d+$/);
+    expect(Number(approve.split(".")[1])).toBe(Date.now() + 5 * 60_000);
+    expect(reject.split(".")[1]).toBe(approve.split(".")[1]);
   });
 
   it("standalone with base-message-payload: custom text/blocks precede the buttons", async () => {

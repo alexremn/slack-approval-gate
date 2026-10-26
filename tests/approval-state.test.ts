@@ -146,6 +146,32 @@ describe("ApprovalState", () => {
     expect(s.getApprovers()).toEqual([]);
   });
 
+  it("rejecting after approving withdraws the approval", async () => {
+    const s = new ApprovalState(["u1", "u2"], 2, 2);
+    await expect(s.tryApprove("u1")).resolves.toBe("remaining");
+    await expect(s.tryReject("u1")).resolves.toBe("remaining");
+    expect(s.getApprovers()).toEqual([]);
+    expect(s.getRejecters()).toEqual(["u1"]);
+    await expect(s.tryApprove("u2")).resolves.toBe("remaining");
+  });
+
+  it("approving after rejecting withdraws the rejection", async () => {
+    const s = new ApprovalState(["u1", "u2"], 2, 2);
+    await s.tryReject("u1");
+    await expect(s.tryApprove("u1")).resolves.toBe("remaining");
+    expect(s.getRejecters()).toEqual([]);
+    expect(s.getRejectionRecords()).toEqual([]);
+    await expect(s.tryReject("u2")).resolves.toBe("remaining");
+    await expect(s.tryApprove("u2")).resolves.toBe("approved");
+  });
+
+  it("a switched vote can reach the other threshold, leaving no stale approval", async () => {
+    const s = new ApprovalState(["u1", "u2"], 2, 1);
+    await s.tryApprove("u1");
+    await expect(s.tryReject("u1")).resolves.toBe("rejected");
+    expect(s.getApprovalRecords()).toEqual([]);
+  });
+
   it("close() fails once a vote has decided the outcome", async () => {
     const s = new ApprovalState(["u1"], 1);
     await s.tryApprove("u1");
