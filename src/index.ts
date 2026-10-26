@@ -30,9 +30,29 @@ async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise
   }
 }
 
+const CONNECT_TIMEOUT_MS = 60_000;
+
 async function main(): Promise<void> {
   const config = loadConfig();
   const ghCtx = readGithubContext();
+
+  // Connect before posting: Socket Mode only delivers clicks once the socket
+  // is open, and a gate that cannot connect must not post buttons nobody can
+  // answer. A failure here fails the step via main().catch, as canceled.
+  const app = new App({
+    token: config.slackBotToken,
+    signingSecret: config.slackSigningSecret || undefined,
+    appToken: config.slackAppToken,
+    socketMode: true,
+    logLevel: LogLevel.INFO,
+  });
+  try {
+    await withTimeout(app.start(), CONNECT_TIMEOUT_MS, "Slack Socket Mode connection");
+  } catch (e) {
+    core.setOutput("result", "canceled");
+    throw e;
+  }
+
   // The nonce keeps button ids unique per gate: matrix legs and parallel jobs
   // share every run-level value, and must never act on each other's clicks.
   const aidSeed = `${ghCtx.repo}-${ghCtx.workflow}-${ghCtx.runId}-${ghCtx.runNumber}-${ghCtx.runAttempt}-${randomUUID()}`;
@@ -83,14 +103,6 @@ async function main(): Promise<void> {
 
   core.setOutput("main-message-ts", mainMessageTs);
   core.setOutput("approval-message-ts", approvalMessageTs);
-
-  const app = new App({
-    token: config.slackBotToken,
-    signingSecret: config.slackSigningSecret || undefined,
-    appToken: config.slackAppToken,
-    socketMode: true,
-    logLevel: LogLevel.INFO,
-  });
 
   let timeoutHandle: NodeJS.Timeout | undefined;
 
@@ -178,26 +190,6 @@ async function main(): Promise<void> {
   }, config.timeoutMs);
   timeoutHandle.unref?.();
 
-  try {
-    await app.start();
-  } catch (e) {
-    core.error(`Bolt app.start failed: ${(e as Error).message}`);
-    if (state.close()) {
-      try {
-        await slack.updateApprovalReply(
-          approvalMessageTs,
-          mergeForUpdate({
-            blocks: renderFinalStatus("canceled", state.getApprovers()),
-            text: "Approval listener failed to start; run canceled.",
-          }),
-        );
-      } catch (updErr) {
-        core.warning(`Cleanup update failed: ${(updErr as Error).message}`);
-      }
-      await shutdown("canceled", 1);
-    }
-    return;
-  }
   core.info("Waiting for approval...");
 }
 

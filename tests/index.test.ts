@@ -16,6 +16,7 @@ interface MockApp {
 const mockApps: MockApp[] = [];
 const mockWebClientArgs: unknown[][] = [];
 let mockStartError: Error | undefined;
+let mockStartHangs = false;
 const mockChat = {
   postMessage: jest.fn(),
   update: jest.fn(),
@@ -51,7 +52,10 @@ jest.mock("@slack/bolt", () => ({
       action: (id: string, fn: Handler) => {
         handlers[id] = fn;
       },
-      start: jest.fn(() => (mockStartError ? Promise.reject(mockStartError) : Promise.resolve())),
+      start: jest.fn(() => {
+        if (mockStartHangs) return new Promise<void>(() => {});
+        return mockStartError ? Promise.reject(mockStartError) : Promise.resolve();
+      }),
       stop: jest.fn().mockResolvedValue(undefined),
     };
     mockApps.push(app);
@@ -102,11 +106,17 @@ function loadEntrypoint(): void {
   });
 }
 
+function waitingCount(): number {
+  return mockCore.info.mock.calls.filter(c => c[0] === "Waiting for approval...").length;
+}
+
+// Resolves once the gate is connected, has posted, and is listening.
 async function startGate(inputs: Record<string, string> = {}): Promise<MockApp> {
   const count = mockApps.length;
+  const waiting = waitingCount();
   setEnv({ approvers: `${U1},${U2}`, ...inputs });
   loadEntrypoint();
-  await until(() => mockApps.length > count && mockApps[count].start.mock.calls.length > 0);
+  await until(() => waitingCount() > waiting);
   return mockApps[count];
 }
 
@@ -137,6 +147,7 @@ beforeEach(() => {
   mockApps.length = 0;
   mockWebClientArgs.length = 0;
   mockStartError = undefined;
+  mockStartHangs = false;
   mockChat.postMessage.mockResolvedValue({ ts: "1.0" });
   mockChat.update.mockResolvedValue({ ok: true });
   mockChat.postEphemeral.mockResolvedValue({ ok: true });
@@ -265,14 +276,34 @@ describe("entrypoint", () => {
     expect(mockChat.update).toHaveBeenCalledTimes(1);
   });
 
-  it("Bolt start failure: marks the message canceled and exits 1", async () => {
+  it("connects to Slack before posting, so early clicks are not lost", async () => {
+    const app = await startGate();
+    expect(app.start.mock.invocationCallOrder[0])
+      .toBeLessThan(mockChat.postMessage.mock.invocationCallOrder[0]);
+  });
+
+  it("Bolt start failure: fails the step and never posts buttons nobody can answer", async () => {
     mockStartError = new Error("socket refused");
-    await startGate();
+    setEnv({ approvers: `${U1},${U2}` });
+    loadEntrypoint();
     await until(() => exitSpy.mock.calls.length > 0);
     expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(mockCore.setFailed).toHaveBeenCalledWith(expect.stringContaining("socket refused"));
     expect(outputs().result).toBe("canceled");
-    expect(mockChat.update.mock.calls[0][0].text).toMatch(/failed to start/);
-    expect(mockCore.error).toHaveBeenCalledWith(expect.stringContaining("socket refused"));
+    expect(mockChat.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("a Slack connection that never completes fails the step after 60 s", async () => {
+    mockStartHangs = true;
+    setEnv({ approvers: `${U1},${U2}` });
+    loadEntrypoint();
+    await until(() => mockApps.length > 0 && mockApps[0].start.mock.calls.length > 0);
+    await jest.advanceTimersByTimeAsync(60_000);
+    await until(() => exitSpy.mock.calls.length > 0);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(mockCore.setFailed).toHaveBeenCalledWith(expect.stringMatching(/timed out/));
+    expect(outputs().result).toBe("canceled");
+    expect(mockChat.postMessage).not.toHaveBeenCalled();
   });
 
   it.each<[string, () => Promise<void>, string]>([
@@ -285,16 +316,6 @@ describe("entrypoint", () => {
     await until(() => exitSpy.mock.calls.length > 0);
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(outputs().result).toBe(result);
-    expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining("invalid_auth"));
-  });
-
-  it("Bolt start failure with Slack down still exits canceled", async () => {
-    mockStartError = new Error("socket refused");
-    mockChat.update.mockRejectedValue(new Error("invalid_auth"));
-    await startGate();
-    await until(() => exitSpy.mock.calls.length > 0);
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(outputs().result).toBe("canceled");
     expect(mockCore.warning).toHaveBeenCalledWith(expect.stringContaining("invalid_auth"));
   });
 

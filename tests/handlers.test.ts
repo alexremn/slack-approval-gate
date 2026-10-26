@@ -310,6 +310,19 @@ describe("registerHandlers", () => {
     expect((deps.slack as jest.Mocked<SlackClient>).updateApprovalReply).toHaveBeenCalledTimes(1);
   });
 
+  it("a progress update is not sent once another vote has closed the gate", async () => {
+    const { app, deps, onTerminal } = makeDeps({ state: new ApprovalState(["u1", "u2"], 2) });
+    registerHandlers(deps);
+    await Promise.all([
+      app.actions["slack-approval-approve"](makeBoltArgs("u1", "approve-id")),
+      app.actions["slack-approval-approve"](makeBoltArgs("u2", "approve-id")),
+    ]);
+    const upd = (deps.slack as jest.Mocked<SlackClient>).updateApprovalReply;
+    expect(onTerminal).toHaveBeenCalledWith("approved");
+    expect(upd).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(upd.mock.calls[0][1])).toContain("Approved");
+  });
+
   it("presses after an outcome is claimed elsewhere (timeout/cancel) are dropped silently", async () => {
     const { app, deps, onTerminal } = makeDeps({
       state: new ApprovalState(["u1"], 1),

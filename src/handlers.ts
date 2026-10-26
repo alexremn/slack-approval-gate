@@ -146,6 +146,8 @@ export function registerHandlers(deps: HandlersDeps): void {
       }
       if (result === "remaining") {
         core.info(`Approval recorded from ${userId}; ${state.getApprovers().length}/${state.minimumCount}`);
+        // Another vote may have closed the gate meanwhile; its final update wins.
+        if (state.isClosed()) return;
         try {
           await slack.updateApprovalReply(
             approvalMessageTs,
@@ -217,6 +219,8 @@ export function registerHandlers(deps: HandlersDeps): void {
       }
       if (result === "remaining") {
         core.info(`Rejection recorded from ${userId}; ${state.getRejecters().length}/${state.minimumRejectCount}`);
+        // Another vote may have closed the gate meanwhile; its final update wins.
+        if (state.isClosed()) return;
         try {
           await slack.updateApprovalReply(
             approvalMessageTs,

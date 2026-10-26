@@ -149,8 +149,8 @@ jobs:
 - Timeout → reply updated with the timed-out block, job exits with code 1 (`result=timed-out`).
 - Exactly one terminal outcome is applied: the first of approval threshold, rejection threshold, timeout, or cancel. Presses after that are dropped.
 - A click on another gate's message that reaches this gate is not counted; the clicker gets an ephemeral "click again" reply (see [Concurrent gates](#concurrent-gates)).
-- Slack API calls retry transient failures (HTTP 429 / 5xx / `ratelimited` / `ETIMEDOUT` / `ECONNRESET`) with jittered exponential backoff (up to 3 attempts).
-- Each Slack request is aborted after 10 s and retried at most twice, so a stalled or failing Slack API gives up within about two minutes and the run still ends with its outcome. Rate-limit pauses follow Slack's `Retry-After`.
+- Slack API calls retry network errors, timeouts, HTTP 5xx and 429 up to 4 times with jittered exponential backoff. Each request is aborted after 10 s, so a stalled or failing Slack API gives up within about two minutes and the run still ends with its outcome. Rate-limit pauses follow Slack's `Retry-After`.
+- The gate connects to Slack before posting, so clicks count from the moment the message appears. If it cannot connect within 60 s, the step fails without posting.
 - `core.info` logs include each approve / reject event, threshold reached, and final outcome.
 
 ### Timeout caveat
